@@ -37,7 +37,6 @@ type ConnState struct {
 }
 
 func replierPoll(listener *net.TCPListener) {
-
 	epollFd, err := unix.EpollCreate(8)
 	if err != nil {
 		log.Panic(err)
@@ -61,7 +60,7 @@ func replierPoll(listener *net.TCPListener) {
 	}
 
 	// Map EpollEvent.Pad to the connection state
-	states := map[int]ConnState{}
+	states := map[int]*ConnState{}
 
 	for {
 		// Wait infinitely until at least one new event is happening
@@ -74,36 +73,14 @@ func replierPoll(listener *net.TCPListener) {
 		// Go though every event occured; most often len(eventsBuf) == 1
 		for _, event := range eventsBuf {
 			if event.Fd == listenerPoll.Fd {
-
 				// AcceptTCP() will now return immediately
 				conn, err := listener.AcceptTCP()
 				if err != nil {
 					log.Panic(err)
 				}
-
-				connFile, err := conn.File()
-				if err != nil {
-					log.Panic(err)
-				}
-				conn.Close() // Close this an use the connFile copy instead
-
-				// Equal to starting the goroutine
-				newState := ConnState{
-					connFile: connFile,
-					buffer:   make([]byte, 16),
-				}
-				fd := int(connFile.Fd())
+				newState := pollNewClient(epollFd, conn)
+				fd := int(newState.connFile.Fd())
 				states[fd] = newState
-
-				connPoll := unix.EpollEvent{
-					Fd:     int32(fd),
-					Events: unix.POLLIN, // POLLIN triggers on accept()
-					Pad:    int32(fd),   // So we can find states[fd] when triggered
-				}
-				err = unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, fd, &connPoll)
-				if err != nil {
-					log.Panic(err)
-				}
 				continue
 			}
 
@@ -129,4 +106,31 @@ func replierPoll(listener *net.TCPListener) {
 			}
 		}
 	}
+}
+
+func pollNewClient(epollFd int, conn *net.TCPConn) *ConnState {
+	connFile, err := conn.File()
+	if err != nil {
+		log.Panic(err)
+	}
+	conn.Close() // Close this an use the connFile copy instead
+
+	// Equal to starting the goroutine
+	newState := ConnState{
+		connFile: connFile,
+		buffer:   make([]byte, 16),
+	}
+	fd := int(connFile.Fd())
+
+	connPoll := unix.EpollEvent{
+		Fd:     int32(fd),
+		Events: unix.POLLIN, // POLLIN triggers on accept()
+		Pad:    int32(fd),   // So we can find states[fd] when triggered
+	}
+	err = unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, fd, &connPoll)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return &newState
 }
