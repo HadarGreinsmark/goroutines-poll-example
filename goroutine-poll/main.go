@@ -53,9 +53,9 @@ func replierPoll(listener *net.TCPListener) {
 	listenerPoll := unix.EpollEvent{
 		Fd:     int32(listenerFile.Fd()),
 		Events: unix.POLLIN, // POLLIN triggers on accept()
-		Pad: 0, // Arbitary data
+		Pad:    0,           // Arbitary data
 	}
-	err = unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, int(listenerPoll.Fd), &listenerPoll)()
+	err = unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, int(listenerPoll.Fd), &listenerPoll)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -65,22 +65,32 @@ func replierPoll(listener *net.TCPListener) {
 
 	for {
 		// Wait infinitely until at least one new event is happening
-		var events []unix.EpollEvent
-		unix.EpollWait(epollFd, events, -1)
+		var eventsBuf [10]unix.EpollEvent
+		_, err := unix.EpollWait(epollFd, eventsBuf[:], -1)
+		if err != nil {
+			log.Panic(err)
+		}
 
-		for _, event := range events {
+		// Go though every event occured; most often len(eventsBuf) == 1
+		for _, event := range eventsBuf {
 			if event.Fd == listenerPoll.Fd {
-				
+
 				// AcceptTCP() will now return immediately
 				conn, err := listener.AcceptTCP()
-				log.Printf("ee %v",err)
-				connFile, _ := conn.File()
+				if err != nil {
+					log.Panic(err)
+				}
+
+				connFile, err := conn.File()
+				if err != nil {
+					log.Panic(err)
+				}
 				conn.Close() // Close this an use the connFile copy instead
 
 				// Equal to starting the goroutine
 				newState := ConnState{
 					connFile: connFile,
-					buffer: make([]byte, 16),
+					buffer:   make([]byte, 16),
 				}
 				fd := int(connFile.Fd())
 				states[fd] = newState
@@ -88,9 +98,12 @@ func replierPoll(listener *net.TCPListener) {
 				connPoll := unix.EpollEvent{
 					Fd:     int32(fd),
 					Events: unix.POLLIN, // POLLIN triggers on accept()
-					Pad: int32(fd), // So we can find states[fd] when triggered
+					Pad:    int32(fd),   // So we can find states[fd] when triggered
 				}
-				unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, fd, &connPoll)
+				err = unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, fd, &connPoll)
+				if err != nil {
+					log.Panic(err)
+				}
 				continue
 			}
 
