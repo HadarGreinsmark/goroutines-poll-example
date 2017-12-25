@@ -31,7 +31,7 @@ func replierGoroutine(listener net.Listener) {
 	}
 }
 
-type ConnState struct {
+type GoroutineState struct {
 	connFile *os.File
 	buffer   []byte
 }
@@ -73,17 +73,21 @@ func replierPoll(listener *net.TCPListener) {
 		// Go though every event occured; most often len(eventsBuf) == 1
 		for _, event := range eventsBuf {
 			if event.Fd == listenerPoll.Fd {
+				// Handle new connection
 				// AcceptTCP() will now return immediately
 				conn, err := listener.AcceptTCP()
 				if err != nil {
 					log.Panic(err)
 				}
-				newState := pollNewClient(epollFd, conn)
+
+				// Equal to creating a new goroutine
+				newState := addNewClientPoll(epollFd, conn)
 				fd := int(newState.connFile.Fd())
 				states[fd] = newState
 				continue
 			}
 
+			// Handle existing connection
 			fd := int(event.Pad)
 			state := states[fd]
 
@@ -108,15 +112,14 @@ func replierPoll(listener *net.TCPListener) {
 	}
 }
 
-func pollNewClient(epollFd int, conn *net.TCPConn) *ConnState {
+func addNewClientPoll(epollFd int, conn *net.TCPConn) *GoroutineState {
 	connFile, err := conn.File()
 	if err != nil {
 		log.Panic(err)
 	}
 	conn.Close() // Close this an use the connFile copy instead
 
-	// Equal to starting the goroutine
-	newState := ConnState{
+	newState := GoroutineState{
 		connFile: connFile,
 		buffer:   make([]byte, 16),
 	}
