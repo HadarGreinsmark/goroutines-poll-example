@@ -15,7 +15,8 @@ func main() {
 		log.Panic(err)
 	}
 
-	replierPoll(listener)
+	replierGoroutine(listener)
+	// replierPoll(listener)
 }
 
 func replierGoroutine(listener net.Listener) {
@@ -60,7 +61,7 @@ func replierPoll(listener *net.TCPListener) {
 	}
 
 	// Map EpollEvent.Pad to the connection state
-	states := map[int]*ConnState{}
+	states := map[int]*GoroutineState{}
 
 	for {
 		// Wait infinitely until at least one new event is happening
